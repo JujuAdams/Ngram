@@ -7,4 +7,5 @@ _string += "Type to search for a word\n";
 _string += "Input = \"" + ngram.GetString() + "\"\n";
 _string += "\n";
 _string += "Results = \"" + string(ngram.GetWordArray()) + "\"\n";
+_string += "Strengths = \"" + string(ngram.GetStrengthArray()) + "\"\n";
 draw_text(10, 10, _string);

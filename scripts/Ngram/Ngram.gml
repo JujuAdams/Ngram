@@ -30,9 +30,15 @@
 ///   information about the found words. It is normally preferable to use the simpler
 ///   .GetWordArray() method above.
 
-function Ngram(_maxSubstringLength = 4) constructor
+function Ngram(_caseSensitive=true, _nGramMin=1, _nGramMax=infinity) constructor
 {
-    __maxSubstringLength = _maxSubstringLength;
+    // Changed to gram min/max for better control commonly elastic searching will always ignore the first letter, or sometimes the second letter, this add basically no additional cpu overhead. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+		__nGramMin = max(1, _nGramMin);
+		__nGramMax = max(__nGramMin, _nGramMax);
+		
+		// Optional Case sensativity. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+		__caseSensitive = _caseSensitive;
+		
     __exactDict = {};
     __ngramDict = {};
     
@@ -40,77 +46,98 @@ function Ngram(_maxSubstringLength = 4) constructor
     __maxResults = 10;
     
     __wordArray = [];
+    __strengthArray = [];
     
     __Clear();
     
     static __Clear = function()
     {
         __wordArrayDirty = true;
+        __strengthArrayDirty = true;
         array_resize(__wordArray, 0);
+        array_resize(__strengthArray, 0);
         __resultArray = [];
     }
     
-    static SetLexiconArray = function(_array)
+    static SetLexiconArray = function(_array, _stringWidthBuffer=4)
     {
         __Clear();
         
         __exactDict = {};
         __ngramDict = {};
         
-        var _funcPush = function(_substring, _string)
+        static __funcPush = function(_substring, _string)
         {
             var _array = __ngramDict[$ _substring];
             if (not is_array(_array))
             {
+								// Left for debugging. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+								//show_debug_message(["_substring", _substring])
                 _array = [_string];
                 __ngramDict[$ _substring] = _array;
             }
             else
             {
-                array_push(_array, _string);
+                if (!array_contains(_array, _string)) {
+									array_push(_array, _string);
+								}
             }
         }
         
+				var _CompletedGrams = [];
+				
         var _i = 0;
         repeat(array_length(_array))
         {
-            var _sourceString = _array[_i];
+            var _sourceString = (__caseSensitive) ? _array[_i] : string_lower(_array[_i]);
             
             __exactDict[$ _sourceString] = true;
             
-            var _sourceLength = string_length(_sourceString);
-            
+						// Left for debugging. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+						//show_debug_message(["_sourceString", _sourceString])
+						
             var _string = _sourceString;
-            repeat(__maxSubstringLength-1)
-            {
-                _string = " " + _string + " ";
-            }
-            
-            var _substringLength = 1;
-            repeat(min(_sourceLength, __maxSubstringLength))
-            {
-                //Ignore very short substrings for long source strings
-                if (6*_substringLength < _sourceLength)
-                {
-                    ++_substringLength;
-                    continue;
-                }
-                
-                var _pos = 1 + __maxSubstringLength - _substringLength;
-                repeat(_sourceLength + _substringLength - 1)
-                {
-                    _funcPush(string_copy(_string, _pos, _substringLength), _sourceString);
-                    ++_pos;
-                }
-                
-                ++_substringLength;
-            }
-            
+						var _sourceLength = string_length(_sourceString);
+						
+						var _nGramMin = __nGramMin;
+						var _nGramMax = min(__nGramMax, _sourceLength);
+						var _nGramLength = _nGramMax - _nGramMin;
+						
+						// For optimization sake you can resize the array to 0 then to the factorial of _sourceLength, but did not do this for readability sake. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+						array_resize(_CompletedGrams, 0); //reuse the same array
+						
+						var _nGramSize = _nGramMin;
+						repeat(_nGramLength + 1)
+						{
+							
+							var _pos = 1;
+							repeat(_sourceLength - _nGramSize + 1)
+							{
+								
+								var _gramSubString = string_copy(_string, _pos, _nGramSize);
+								if (!array_contains(_CompletedGrams, _gramSubString))
+								{
+									
+									// Left for debugging. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+									//show_debug_message([ $"string_copy({_string}, {_pos}, {_nGramSize})", _gramSubString])
+									__funcPush(_gramSubString, _sourceString);
+									
+									// If using the factorial resize mentioned above change this to an index assignment. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+									array_push(_CompletedGrams, _gramSubString);
+									
+								}
+								
+								++_pos;
+							}
+							
+							++_nGramSize;
+						}//end repeat loop
+						
             ++_i;
         }
     }
     
-    static SetString = function(_inString)
+    static SetString = function(_inString, _caseSensitive=__caseSensitive, _nGramMin=__nGramMin, _nGramMax=__nGramMax)
     {
         if (_inString != __string)
         {
@@ -133,30 +160,37 @@ function Ngram(_maxSubstringLength = 4) constructor
                 _resultDict[$ __string] = _result;
             }
             
-            var _sourceString = __string;
+            var _sourceString = (_caseSensitive) ? __string : string_lower(__string);
             var _sourceLength = string_length(_sourceString);
             
             var _string = _sourceString;
-            repeat(__maxSubstringLength-1)
-            {
-                _string = " " + _string + " ";
-            }
             
-            var _substringLength = 1;
-            repeat(min(_sourceLength, __maxSubstringLength))
-            {
-                var _pos = 1 + __maxSubstringLength - _substringLength;
-                repeat(_sourceLength + _substringLength - 1)
-                {
-                    var _substring = string_copy(_string, _pos, _substringLength);
-                    
-                    var _ngramArray = _ngramDict[$ _substring];
-                    if (is_array(_ngramArray))
+						
+						//var _nGramMin = __nGramMin;
+						_nGramMax = min(_nGramMax, _sourceLength);
+						var _nGramLength = _nGramMax - _nGramMin;
+						
+						var _nGramSize = _nGramMin;
+						repeat(_nGramLength + 1)
+						{
+							
+							var _pos = 1;
+							repeat(_sourceLength - _nGramSize + 1)
+							{
+								
+								var _gramSubString = string_copy(_string, _pos, _nGramSize);
+								
+								var _nGramReturnArray = _ngramDict[$ _gramSubString];
+								
+								// Left for debugging. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+								//show_debug_message(string_join("\n", $"_substring {_gramSubString}", $"_ngramArray {_nGramReturnArray}" ))
+								
+								if (is_array(_nGramReturnArray))
                     {
                         var _j = 0;
-                        repeat(array_length(_ngramArray))
+                        repeat(array_length(_nGramReturnArray))
                         {
-                            var _foundString = _ngramArray[_j];
+                            var _foundString = _nGramReturnArray[_j];
                             
                             var _result = _resultDict[$ _foundString];
                             if (_result == undefined)
@@ -172,17 +206,20 @@ function Ngram(_maxSubstringLength = 4) constructor
                             else
                             {
                                 ++_result.strength;
+																// Optional Alternitive and really dependant on your use case, personally i prefer the method used above. -@Tinkerer_Red (2023/11/20 YYYY/MM/DD)
+																// _result.strength += _nGramSize;
                             }
                             
                             ++_j;
                         }
                     }
-                    
-                    ++_pos;
-                }
-                
-                ++_substringLength;
-            }
+								
+								++_pos;
+							}
+							
+							++_nGramSize;
+						}//end repeat loop
+						
             
             array_sort(_resultArray, function(_a, _b)
             {
@@ -190,6 +227,7 @@ function Ngram(_maxSubstringLength = 4) constructor
             });
             
             __wordArrayDirty = true;
+            __strengthArrayDirty = true;
         }
     }
     
@@ -232,5 +270,22 @@ function Ngram(_maxSubstringLength = 4) constructor
         }
         
         return __wordArray;
+    }
+		
+		static GetStrengthArray = function()
+    {
+        if (__strengthArrayDirty)
+        {
+            array_resize(__strengthArray, 0);
+            
+            var _i = 0;
+            repeat(min(array_length(__resultArray), __maxResults))
+            {
+                array_push(__strengthArray, __resultArray[_i].strength);
+                ++_i;
+            }
+        }
+        
+        return __strengthArray;
     }
 }
